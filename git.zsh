@@ -14,45 +14,54 @@ pr-create() {
     return 1
   fi
 
-  if $use_dynamic_upstream; then
-    # Current repo (owner/repo)
-    repo_path=$(git remote get-url origin | sed -E 's|.*github\.com[:/](.+)\.git|\1|')
-    if [[ -z "$repo_path" ]]; then
-      echo "❌ Could not determine repository path from origin remote"
-      return 1
-    fi
+  # Current repo (owner/repo)
+  repo_path=$(git remote get-url origin | sed -E 's|.*github\.com[:/](.+)\.git|\1|')
+  if [[ -z "$repo_path" ]]; then
+    echo "❌ Could not determine repository path from origin remote"
+    return 1
+  fi
 
-    owner="${repo_path%%/*}"
-    repo="${repo_path#*/}"
+  owner="${repo_path%%/*}"
+  repo="${repo_path#*/}"
+  upName="upstream"
+  if git remote | grep -q '^ustream$'; then
+    # Get owner from ustream remote URL
+    upOwner=$(git remote get-url ustream | sed -E 's|.*github\.com[:/](.+)/.+\.git|\1|; s|/.*||')
+  else
+    upOwner="$owner"
+    upName="origin"
+  fi
+
+  if $use_dynamic_upstream; then
 
     echo "Current repo detected: $owner/$repo"
 
     echo "Fetching list of upstream forks (this may take a moment)..."
-    forks=$(gh api repos/shikhartech/$repo/forks --paginate --jq '.[].full_name')
+    forks=$(gh api repos/$upOwner/$repo/forks --paginate --jq '.[].full_name')
 
     # Add main upstream repo at the top as default choice
-    forks="shikhartech/$repo"$'\n'"$forks"
+    forks="$upOwner/$repo"$'\n'"$forks"
 
-    selected_upstream=$(echo "$forks" | fzf --prompt="Select upstream repo for PR (default: shikhartech/$repo): " --height=40% --reverse --border --select-1 --exit-0)
+    selected_upstream=$(echo "$forks" | fzf --prompt="Select upstream repo for PR (default: $upOwner/$repo): " --height=40% --reverse --border --select-1 --exit-0)
 
     if [[ -z "$selected_upstream" ]]; then
-      selected_upstream="shikhartech/$repo"
+      selected_upstream="$upOwner/$repo"
     fi
 
   else
-    selected_upstream="shikhartech/$repo"
+    selected_upstream="$upOwner/$repo"
   fi
 
   echo "Selected upstream repo: $selected_upstream"
 
   # Set or update upstream remote
-  if ! git remote | grep -q '^upstream$'; then
-    git remote add upstream "https://github.com/$selected_upstream.git"
+  if ! git remote | grep -q "^$upName$"; then
+    git remote add $upName "https://github.com/$selected_upstream.git"
   else
-    current_upstream_url=$(git remote get-url upstream)
+    current_upstream_url=$(git remote get-url $upName)
     expected_url="https://github.com/$selected_upstream.git"
     if [[ "$current_upstream_url" != "$expected_url" ]]; then
-      git remote set-url upstream "$expected_url"
+      git remote set-url $upName "$expected_url"
     fi
   fi
 
@@ -60,9 +69,9 @@ pr-create() {
   head_branch=${current_branch:-main}
 
   echo "Fetching branches from $selected_upstream..."
-  git fetch upstream &>/dev/null
+  git fetch $upName &>/dev/null
 
-  branches=$(git branch -r | grep 'upstream/' | sed 's| *upstream/||' | sort -u)
+  branches=$(git branch -r | grep "$upName/" | sed "s| *$upName/||" | sort -u)
 
   if echo "$branches" | grep -qx "$current_branch"; then
     default_selection="$current_branch"
@@ -71,11 +80,11 @@ pr-create() {
   fi
 
   base_branch=$(echo "$branches" | fzf \
-    --prompt="Select upstream base branch: " \
+    --prompt="Select $upName base branch: " \
     --height=40% \
     --reverse \
     --border \
-    --preview="git log upstream/{} --oneline -n 5" \
+    --preview="git log $upName/{} --oneline -n 5" \
     --query="$default_selection")
 
   if [[ -z "$base_branch" ]]; then
