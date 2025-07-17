@@ -6,5 +6,23 @@ Starting with Git and GitHub automation — like interactive pull request creati
 
 ---
 
+---
+
+## **🔧 Setup**
+
+To use these functions in your terminal, source the script in your `.bashrc`, `.zshrc`, or custom shell config:
+
+bash  
+CopyEdit  
+`source /path/to/pr-tools.sh`
+
+Then reload your shell:
+
+bash  
+CopyEdit  
+`source ~/.zshrc  # or ~/.bashrc`
+
+---
+
 > 📘 Looking for GitHub PR helpers?  
 > Check out the full documentation here → [git.md](./git/git.md)

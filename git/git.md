@@ -43,23 +43,6 @@ CopyEdit
 `# To add upstream (if missing)`  
 `git remote add upstream https://github.com/OWNER/REPO.git`
 
----
-
-## **🔧 Setup**
-
-To use these functions in your terminal, source the script in your `.bashrc`, `.zshrc`, or custom shell config:
-
-bash  
-CopyEdit  
-`source /path/to/pr-tools.sh`
-
-Then reload your shell:
-
-bash  
-CopyEdit  
-`source ~/.zshrc  # or ~/.bashrc`
-
----
 
 ## **✨ Function: `pr-create`**
 
