@@ -107,9 +107,17 @@ pr-create() {
   echo "Pushing to origin/$head_branch..."
   git push origin "$head_branch" || return 1
 
+  # Extract the ticket ID from the branch name if it ends with -<number>
+  if [[ "$head_branch" =~ -([0-9]+)$ ]]; then
+    ticket_id="${match[1]}"
+    pr_body="tid-${ticket_id}"
+  else
+    pr_body=""
+  fi
+
   # Create PR targeting base branch of selected upstream repo
   echo "Creating PR from ${selected_upstream%%/*}:$base_branch --head $userName:$head_branch"
-  gh pr create --base "${selected_upstream%%/*}:$base_branch" --head "$userName:$head_branch" -w
+  gh pr create --base "${selected_upstream%%/*}:$base_branch" --head "$userName:$head_branch" --body "$pr_body" -w
 }
 
 pr-review() {
@@ -183,7 +191,6 @@ pr-review() {
     echo "✅ PR #$pr_number approved."
   fi
 
-  echo ""
   # Retrieve PR title and base branch
   pr_meta=$(gh pr view "$pr_number" --json title,baseRefName \
     --jq '{title, base: .baseRefName}')
@@ -193,7 +200,8 @@ pr-review() {
 
   echo ""
   # Confirm merge
-  read -r -p "🟢 Merge PR #$pr_number: \"$pr_title\" → base: $pr_base? [y/N]: " should_merge
+  echo -n "🟢 Merge PR #$pr_number: \"$pr_title\" → base: $pr_base? [y/N]: "
+  read should_merge
 
   if [[ "$should_merge" =~ ^[Yy]$ ]]; then
     echo "🔃 Merging PR #$pr_number..."
