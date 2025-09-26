@@ -36,8 +36,6 @@ If `upstream` is not set, the script will fall back to `origin` as the upstream 
 
 To check or set your remotes:
 
-bash  
-CopyEdit  
 `git remote -v`
 
 `# To add upstream (if missing)`  
@@ -50,10 +48,10 @@ Creates a GitHub pull request from your fork (`origin`) to the upstream reposito
 
 ### **🔹 Usage**
 
-bash  
-CopyEdit  
 `pr-create [-t]`
 
+**Shikhartech**:  
+If a branch name ends with `-{taskId}` (for example, `testBranch-123`), the pull request will automatically include that **task ID**, which will then be reflected in **TDMS**.
 ### **🔸 Options**
 
 | Flag | Description |
@@ -76,8 +74,6 @@ CopyEdit
 
 ### **📌 Example**
 
-bash  
-CopyEdit  
 `pr-create -t`
 
 This will allow dynamic upstream selection before creating the PR.
@@ -90,8 +86,6 @@ Interactively reviews, approves, and optionally merges an open pull request.
 
 ### **🔹 Usage**
 
-bash  
-CopyEdit  
 `pr-review`
 
 ### **🧠 How It Works**
@@ -108,8 +102,7 @@ CopyEdit
 
 ### **📌 Example**
 
-bash  
-CopyEdit  
+
 `pr-review`
 
 Select a PR, review its commits, approve it (if needed), and optionally merge it.
