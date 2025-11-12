@@ -1,31 +1,25 @@
 pr-create() {
-  # -----------------------------
   # Parse command-line arguments
-  # -----------------------------
   use_dynamic_upstream=false
   while [[ "$1" != "" ]]; do
     case $1 in
-      -t ) use_dynamic_upstream=true ;;
-      *  ) echo "❌ Unknown option: $1"; return 1 ;;
+      -t ) use_dynamic_upstream=true ;;  # Enable dynamic upstream selection via -t
+      * ) echo "❌ Unknown option: $1"; return 1 ;;  # Handle unknown flags
     esac
     shift
   done
 
-  # -----------------------------
-  # Ensure inside a Git repo
-  # -----------------------------
+  # Ensure inside a Git repository
   if ! git rev-parse --is-inside-work-tree &>/dev/null; then
     echo "❌ Not inside a Git repository"
     return 1
   fi
 
-  # -----------------------------
-  # Extract origin repo path
-  # -----------------------------
-  originPath=$(git remote get-url origin 2>/dev/null | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?$|\1|')
+  # Extract GitHub repo path (user/repo) from origin remote
+  originPath=$(git remote get-url origin | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?$|\1|')
   userName=${originPath%%/*}
 
-  # Determine upstream remote (default to origin if not present)
+  # Determine upstream remote or fall back to origin
   if git remote | grep -q '^upstream$'; then
     repo_path=$(git remote get-url upstream | sed -E 's|.*github\.com[:/]([^/]+/[^/.]+)(\.git)?$|\1|')
     upName="upstream"
@@ -34,53 +28,62 @@ pr-create() {
     upName="origin"
   fi
 
+  # Check that repo path was successfully determined
   if [[ -z "$repo_path" ]]; then
     echo "❌ Could not determine repository path"
     return 1
   fi
 
+  # Parse owner and repo from path
   owner="${repo_path%%/*}"
   repo="${repo_path#*/}"
   upOwner="$owner"
 
-  # -----------------------------
-  # Dynamic upstream selection
-  # -----------------------------
+  # If -t is passed, dynamically fetch and choose upstream fork
   if $use_dynamic_upstream; then
     echo "Current repo detected: $owner/$repo"
-    echo "Fetching upstream forks..."
+    echo "Fetching list of upstream forks (this may take a moment)..."
+
     forks=$(gh api repos/"$upOwner"/"$repo"/forks --paginate --jq '.[].full_name')
-    forks="$upOwner/$repo"$'\n'"$forks"
+    forks="$upOwner/$repo"$'\n'"$forks"  # Add upstream as default option
 
-    selected_upstream=$(echo "$forks" | fzf \
-      --prompt="Select upstream repo for PR (default: $upOwner/$repo): " \
-      --height=40% --reverse --border --select-1 --exit-0)
+    # Prompt user to choose an upstream repo
+    selected_upstream=$(echo "$forks" | fzf --prompt="Select upstream repo for PR (default: $upOwner/$repo): " --height=40% --reverse --border --select-1 --exit-0)
 
-    selected_upstream=${selected_upstream:-"$upOwner/$repo"}
+    # Default to original upstream if none selected
+    if [[ -z "$selected_upstream" ]]; then
+      selected_upstream="$upOwner/$repo"
+    fi
   else
     selected_upstream="$upOwner/$repo"
   fi
 
   echo "Selected upstream repo: $selected_upstream"
 
-  # -----------------------------
-  # Determine remote name / URL
-  # -----------------------------
-  selected_owner="${selected_upstream%%/*}"
-  selected_repo="${selected_upstream#*/}"
+  # Extract owner and repo name
+  selected_owner=$(echo "$selected_upstream" | cut -d'/' -f1)
+  selected_repo=$(echo "$selected_upstream" | cut -d'/' -f2)
+
+  # Build canonical HTTPS URL
   https_url="https://github.com/$selected_upstream.git"
 
+  # Helper: normalize URL (remove protocol differences and optional .git)
   normalize_url() {
     url="$1"
+    # Remove protocol prefix
     url=${url#git@github.com:}
     url=${url#https://github.com/}
+    # Remove optional .git suffix
     url=${url%.git}
     echo "$url"
   }
 
   selected_normalized=$(normalize_url "$https_url")
+
+  # Flag for found remote
   found_remote_name=""
 
+  # Iterate through all remotes to check if URL already exists
   while read -r remote_name remote_url _; do
     remote_normalized=$(normalize_url "$remote_url")
     if [[ "$remote_normalized" == "$selected_normalized" ]]; then
@@ -90,95 +93,87 @@ pr-create() {
   done < <(git remote -v)
 
   if [[ -n "$found_remote_name" ]]; then
-    echo "Remote already exists as '$found_remote_name'"
+    echo "Remote for '$selected_upstream' already exists as '$found_remote_name'."
     selected_owner="$found_remote_name"
-  elif [[ "$selected_owner" != "origin" && "$selected_owner" != "upstream" ]]; then
-    echo "Adding remote '$selected_owner' -> $https_url"
-    git remote add "$selected_owner" "$https_url"
   else
-    echo "Skipping creation of '$selected_owner' (reserved name)"
+    # Avoid clashing with reserved names
+    if [[ "$selected_owner" != "origin" && "$selected_owner" != "upstream" ]]; then
+      echo "Adding new remote '$selected_owner' -> $https_url"
+      git remote add "$selected_owner" "$https_url"
+    else
+      echo "Skipping creation of '$selected_owner' (reserved name)."
+    fi
   fi
 
   echo "Using remote: $selected_owner"
 
-  # -----------------------------
-  # Get current branch
-  # -----------------------------
+
+  # Get the current branch name, default to 'main' if not found
   current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
   head_branch=${current_branch:-main}
 
-  # -----------------------------
-  # Fetch branch
-  # -----------------------------
+  echo "Fetching branches from $selected_upstream..."
+
+  # Fetch branches from upstream or selected remote
   if [[ "$selected_owner" == "upstream" ]]; then
     echo "Fetching all branches from upstream..."
     git fetch upstream &>/dev/null
-  elif [[ -n "$head_branch" ]]; then
-    echo "Fetching branch '$head_branch' from '$selected_owner'..."
-    git fetch "$selected_owner" "$head_branch":"$head_branch" &>/dev/null
   else
-    echo "No branch specified. Fetching all from '$selected_owner'..."
-    git fetch "$selected_owner" &>/dev/null
+    if [[ -n "$head_branch" ]]; then
+      echo "Fetching branch '$head_branch' from remote '$selected_owner'..."
+      git fetch "$selected_owner" "$head_branch" &>/dev/null
+    else
+      echo "No head branch specified. Fetching all branches from '$selected_owner'..."
+      git fetch "$selected_owner main" &>/dev/null
+    fi
   fi
 
-  # -----------------------------
-  # List remote branches
-  # -----------------------------
+  # List available remote branches from upstream
   branches=$(git branch -r | grep "$selected_owner/" | sed "s| *$selected_owner/||" | sort -u)
 
-  # -----------------------------
-  # Determine default base branch
-  # -----------------------------
+  # Suggest current branch or fallback to 'main' as default
   if echo "$branches" | grep -qx "$current_branch"; then
     default_selection="$current_branch"
   elif [[ "$current_branch" == stg* ]]; then
-    default_selection="staging"
+      default_selection="staging"
   elif [[ "$current_branch" == dev* ]]; then
     default_selection="development"
   else
     default_selection="main"
   fi
 
-  # -----------------------------
-  # Prompt user for base branch
-  # -----------------------------
+  # Prompt user to choose a base branch from upstream
   base_branch=$(echo "$branches" | fzf \
     --prompt="Select $selected_upstream base branch: " \
-    --height=40% --reverse --border \
+    --height=40% \
+    --reverse \
+    --border \
     --preview="git log $selected_owner/{} --oneline -n 5" \
     --query="$default_selection")
 
+  # Abort if no base branch selected
   if [[ -z "$base_branch" ]]; then
     echo "❌ No branch selected. Aborting."
     return 1
   fi
 
-  # -----------------------------
-  # Push current branch
-  # -----------------------------
-  echo "Pushing $head_branch to origin..."
+  # Push current branch to origin before PR
+  echo "Pushing to origin/$head_branch..."
   git push origin "$head_branch" || return 1
 
-  # -----------------------------
-  # Extract ticket ID for PR body
-  # -----------------------------
+  # Extract the ticket ID from the branch name if it ends with -<number>
   if [[ "$head_branch" =~ -([0-9]+)$ ]]; then
-    ticket_id="${BASH_REMATCH[1]}"
+    ticket_id="${match[1]}"
     pr_body="tid-${ticket_id}"
   else
-    pr_body=""
+    pr_body="aa"
   fi
 
-  # -----------------------------
-  # Create PR
-  # -----------------------------
-  echo "Creating PR: base=$selected_upstream:$base_branch, head=$userName:$head_branch"
-  gh pr create \
-    --base "${selected_upstream%%/*}:$base_branch" \
-    --head "$userName:$head_branch" \
-    --body "$pr_body" -w
+  # Create PR targeting base branch of selected upstream repo
+  echo "Creating PR from ${selected_upstream%%/*}:$base_branch --head $userName:$head_branch"
+  # echo "gh pr create --base ${selected_upstream%%/*}:$base_branch --head $userName:$head_branch --body $pr_body --label $default_selection -w"
+  gh pr create --base "${selected_upstream%%/*}:$base_branch" --head "$userName:$head_branch" --body "$pr_body" --label "$default_selection" -w
 }
-
 
 pr-review() {
   # Check required CLI tools
